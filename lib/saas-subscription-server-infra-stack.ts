@@ -46,7 +46,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     );
  
     const instance = new rds.DatabaseInstance(this, "Database", {
-      databaseName: 'saas-subscription',
+      databaseName: 'SaasSubscription',
       engine: rds.DatabaseInstanceEngine.mysql({
         version: rds.MysqlEngineVersion.VER_8_0_31,
       }),
