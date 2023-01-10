@@ -43,7 +43,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
  
     const instance = new rds.DatabaseInstance(this, "Database", {
       engine: rds.DatabaseInstanceEngine.mysql({
-        version: rds.MysqlEngineVersion.VER_8_0_19,
+        version: rds.MysqlEngineVersion.VER_8_0_31,
       }),
       vpc,
       deleteAutomatedBackups: true,
