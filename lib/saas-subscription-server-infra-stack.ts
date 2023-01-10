@@ -2,6 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretmanager from 'aws-cdk-lib/aws-secretsmanager';
 
@@ -34,6 +36,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
 
     const rdsSecurityGroup = new ec2.SecurityGroup(this, "RdsSecurityGroup", {
       vpc,
+      securityGroupName: 'saas-subscription-sg'
     });
 
     rdsSecurityGroup.addIngressRule(
@@ -43,6 +46,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     );
  
     const instance = new rds.DatabaseInstance(this, "Database", {
+      databaseName: 'saas-subscription',
       engine: rds.DatabaseInstanceEngine.mysql({
         version: rds.MysqlEngineVersion.VER_8_0_31,
       }),
@@ -61,6 +65,35 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
 
     const ecrRepository = new ecr.Repository(this, 'ECR', {
       repositoryName: 'saas-subscription-server'
+    });
+
+    const cluster = new ecs.Cluster(this, "EcsCluster", { vpc, clusterName: 'saas-subscription-cluster' });
+
+    const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef");
+
+    const container = taskDefinition.addContainer("WebContainer", {
+      image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample"),
+      memoryLimitMiB: 512,
+    });
+    container.addPortMappings({
+      containerPort: 80,
+    });
+
+    const fatgetService = new ecs.FargateService(this, "FargateService", {
+      cluster,
+      taskDefinition,
+      serviceName: 'saas-subscription-svc'
+    });
+
+    const lb = new elbv2.ApplicationLoadBalancer(this, "LB", {
+      vpc,
+      internetFacing: true,
+      loadBalancerName: 'saas-subscription-lb',
+    });
+    const listener = lb.addListener("Listener", { port: 80 });
+    listener.addTargets("ECS", {
+      port: 80,
+      targets: [fatgetService],
     });
   }
 }
