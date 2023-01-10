@@ -15,8 +15,6 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     const secret = new secretmanager.Secret(this, 'Secret', {
       secretName: 'saas-subscription-server-secret',
       secretObjectValue: {
-        DB_DATABASE: cdk.SecretValue.unsafePlainText(process.env.DB_DATABASE!),
-
         PRIVATE_KEY_PATH_BASE64_STR: cdk.SecretValue.unsafePlainText(process.env.PRIVATE_KEY_PATH_BASE64_STR!),
         PUBLIC_KEY_PATH_BASE64_STR: cdk.SecretValue.unsafePlainText(process.env.PUBLIC_KEY_PATH_BASE64_STR!),
 
@@ -44,7 +42,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
       ec2.Port.tcp(3306),
       "allow public mysql access"
     );
- 
+
     const instance = new rds.DatabaseInstance(this, "Database", {
       databaseName: 'SaasSubscription',
       engine: rds.DatabaseInstanceEngine.mysql({
@@ -72,7 +70,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef");
 
     const container = taskDefinition.addContainer("WebContainer", {
-      image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample"),
+      image: ecs.ContainerImage.fromEcrRepository(ecrRepository, '1.0.0'),
       memoryLimitMiB: 512,
       environment: {
         NODE_ENV: 'staging',
@@ -86,7 +84,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
         DB_USERNAME: ecs.Secret.fromSecretsManager(instance.secret!, 'username'),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(instance.secret!, 'password'),
         DB_PORT: ecs.Secret.fromSecretsManager(instance.secret!, 'port'),
-        DB_DATABASE: ecs.Secret.fromSecretsManager(secret, 'DB_DATABASE'),
+        DB_DATABASE: ecs.Secret.fromSecretsManager(instance.secret!, 'dbname'),
         PRIVATE_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PRIVATE_KEY_PATH_BASE64_STR'),
         PUBLIC_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PUBLIC_KEY_PATH_BASE64_STR'),
         SWAGGER_USERNAME: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_USERNAME'),
@@ -95,9 +93,10 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
         TAP_PAY_MERCHANT_ID: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_MERCHANT_ID'),
         TAP_PAY_PARTNER_KEY: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_PARTNER_KEY'),
       },
+      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'saas-subscription-server' }),
     });
     container.addPortMappings({
-      containerPort: 80,
+      containerPort: 8080,
     });
 
     const fatgetService = new ecs.FargateService(this, "FargateService", {
