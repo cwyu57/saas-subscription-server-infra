@@ -74,6 +74,27 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     const container = taskDefinition.addContainer("WebContainer", {
       image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample"),
       memoryLimitMiB: 512,
+      environment: {
+        NODE_ENV: 'staging',
+        DOTENV_FLOW_SILENT: 'false',
+        DB_MAX_CONNECTION: '10',
+        DB_MAX_RETRY: '3',
+        TAP_PAY_BASE_URL: 'https://sandbox.tappaysdk.com',
+      },
+      secrets: {
+        DB_HOST: ecs.Secret.fromSecretsManager(instance.secret!, 'host'),
+        DB_USERNAME: ecs.Secret.fromSecretsManager(instance.secret!, 'username'),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(instance.secret!, 'password'),
+        DB_PORT: ecs.Secret.fromSecretsManager(instance.secret!, 'port'),
+        DB_DATABASE: ecs.Secret.fromSecretsManager(secret, 'DB_DATABASE'),
+        PRIVATE_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PRIVATE_KEY_PATH_BASE64_STR'),
+        PUBLIC_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PUBLIC_KEY_PATH_BASE64_STR'),
+        SWAGGER_USERNAME: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_USERNAME'),
+        SWAGGER_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_PASSWORD'),
+        SYSTEM_API_KEY: ecs.Secret.fromSecretsManager(secret, 'SYSTEM_API_KEY'),
+        TAP_PAY_MERCHANT_ID: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_MERCHANT_ID'),
+        TAP_PAY_PARTNER_KEY: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_PARTNER_KEY'),
+      },
     });
     container.addPortMappings({
       containerPort: 80,
