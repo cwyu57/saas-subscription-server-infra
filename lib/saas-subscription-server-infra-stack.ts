@@ -125,13 +125,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
       region: 'us-east-1', // ACM certificates that are used with CloudFront -- or higher-level constructs which rely on CloudFront -- must be in the us-east-1 region.
     });
 
-    const certificateTokyo = new acm.DnsValidatedCertificate(this, 'CertificateTokyo', {
-      domainName: '*.cwyu57.app',
-      hostedZone: hostedZone,
-    });
-
     const listener = lb.addListener("Listener", {
-      // certificates: [certificateTokyo],
       port: 80,
     });
 
