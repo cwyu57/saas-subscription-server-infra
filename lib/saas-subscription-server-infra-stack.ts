@@ -200,7 +200,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef");
 
-    const container = taskDefinition.addContainer("WebContainer", {
+    const container = taskDefinition.addContainer("saas-subscription-server", {
       image: ecs.ContainerImage.fromEcrRepository(ecrRepository, '1.0.0'),
       memoryLimitMiB: 512,
       environment: {
@@ -233,7 +233,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     const fargateService = new ecs.FargateService(this, "FargateService", {
       cluster,
       taskDefinition,
-      serviceName: 'saas-subscription-svc'
+      serviceName: 'saas-subscription-svc',
     });
 
     const lb = new elbv2.ApplicationLoadBalancer(this, "LB", {
