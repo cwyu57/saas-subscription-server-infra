@@ -2,13 +2,18 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as codebuild from 'aws-cdk-lib/aws-codebuild';
+import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
+import * as codepipelineactions from 'aws-cdk-lib/aws-codepipeline-actions';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 export class SaasSubscriptionServerInfraStack extends cdk.Stack {
@@ -24,13 +29,126 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
 
     const ecrRepository = this.prepareContainerRegistry();
 
-    const lb = this.prepareComputeLayer(vpc, ecrRepository, database, secret);
+    const { lb, fargateService } = this.prepareComputeLayer(vpc, ecrRepository, database, secret);
     
     const { certificate, hostedZone } = this.setupDns();
 
     const distribution = this.prepareCdn(lb, certificate);
 
     this.addAlternateDomainNameToCdn(distribution, hostedZone);
+
+    const artifactBucket = new s3.Bucket(this, 'ArtifactsBucket', {
+      bucketName: 'saas-subscription-cicd-artifacts',
+    });
+
+    const codebuildProject = new codebuild.Project(this, 'CodeBuildProject', {
+      projectName: 'saas-subscription-server',
+      source: codebuild.Source.gitHub({
+        owner: 'cwyu57',
+        repo: 'saas-subscription-server',
+        webhook: true,
+        webhookFilters: [
+          codebuild.FilterGroup.inEventOf(codebuild.EventAction.PUSH).andTagIs('*'),
+        ],
+      }),
+      environment: {
+        buildImage: codebuild.LinuxBuildImage.AMAZON_LINUX_2_4,
+        privileged: true,
+      },
+      environmentVariables: {
+        AWS_ACCOUNT_ID: {
+          value: cdk.Stack.of(this).account,
+        },
+        ECR_URI: {
+          value: `${cdk.Stack.of(this).account}.dkr.ecr.${cdk.Stack.of(this).region}.amazonaws.com/saas-subscription-server`,
+        },
+      },
+      vpc: vpc,
+      buildSpec: codebuild.BuildSpec.fromObject({
+        version: '0.2',
+        phases: {
+          install: {
+            'runtime-versions': {
+              nodejs: 16,
+            },
+          },
+          build: {
+            commands: [
+              // 'printenv',
+              // 'aws --version',
+              // 'docker -v',
+              // "AWS_ACCOUNT_ID=$(aws sts get-caller-identity --output text | awk '{ print $1 }')",
+              // "echo $AWS_ACCOUNT_ID",
+              // "echo $TAG",
+
+              "TAG=$(echo $CODEBUILD_WEBHOOK_TRIGGER | cut -d / -f 2)",
+
+              "$(aws ecr get-login --no-include-email --region $AWS_REGION)",
+
+              "docker build -t saas-subscription-server .",
+
+              "docker tag saas-subscription-server $ECR_URI:$TAG",
+              "docker tag saas-subscription-server $ECR_URI:latest",
+
+              "docker push $ECR_URI:$TAG",
+              "docker push $ECR_URI:latest",
+
+              "echo '[{\"name\":\"saas-subscription-server\",\"imageUri\":\"$ECR_URI:$TAG\"}]' > imagedefinitions.json"
+            ],
+          },
+        },
+        artifacts: {
+          files: ['imagedefinitions.json'],
+        },
+      }),
+      artifacts: codebuild.Artifacts.s3({
+        bucket: artifactBucket,
+        name: 'deployment.zip',
+        includeBuildId: false,
+      })
+    });
+
+    codebuildProject.role?.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['ecr:*'],
+      resources: [ecrRepository.repositoryArn]
+    }));
+    codebuildProject.role?.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['ecr:GetAuthorizationToken'],
+      resources: ['*']
+    }));
+
+    const codepipelineArtifacts = new codepipeline.Artifact();
+
+    const codepipelineProject = new codepipeline.Pipeline(this, 'CodePipelineProject', {
+      pipelineName: 'saas-subscription-server',
+      // role: config.iamRole,
+      artifactBucket: artifactBucket,
+      stages: [
+        {
+          stageName: 'Source',
+          actions: [
+            new codepipelineactions.S3SourceAction({
+              actionName: 'FetchECRImageDefinition',
+              bucket: artifactBucket,
+              bucketKey: 'deployment.zip',
+              output: codepipelineArtifacts,
+            }),
+          ],
+        },
+        {
+          stageName: `DeployToECS`,
+          actions: [
+            new codepipelineactions.EcsDeployAction({
+              actionName: `DeployToECS`,
+              service: fargateService,
+              input: codepipelineArtifacts,
+              runOrder: 1,
+            }),
+          ],
+        },
+      ]
+    });
+
 
   }
 
@@ -127,7 +245,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
       port: 80,
       targets: [fatgetService],
     });
-    return lb;
+    return { lb, fatgetService };
   }
 
   private prepareContainerRegistry() {
