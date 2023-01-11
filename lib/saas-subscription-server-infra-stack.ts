@@ -44,6 +44,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
   private prepareCicd(vpc: cdk.aws_ec2.Vpc, ecrRepository: cdk.aws_ecr.Repository, fargateService: cdk.aws_ecs.FargateService) {
     const artifactBucket = new s3.Bucket(this, 'ArtifactsBucket', {
       bucketName: 'saas-subscription-cicd-artifacts',
+      versioned: true,
     });
 
     const codebuildProject = new codebuild.Project(this, 'CodeBuildProject', {
