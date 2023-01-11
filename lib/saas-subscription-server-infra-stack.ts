@@ -147,6 +147,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
         }),
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
         originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
       },
       certificate: certificate,
       domainNames: [
