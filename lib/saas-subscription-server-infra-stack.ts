@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
@@ -7,6 +8,7 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as secretmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 export class SaasSubscriptionServerInfraStack extends cdk.Stack {
@@ -112,14 +114,52 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
       internetFacing: true,
       loadBalancerName: 'saas-subscription-lb',
     });
-    const listener = lb.addListener("Listener", { port: 80 });
+
+    const hostedZone = new route53.PublicHostedZone(this, 'HostedZone', {
+      zoneName: 'cwyu57.app',
+    });
+
+    const certificate = new acm.DnsValidatedCertificate(this, 'Certificate', {
+      domainName: '*.cwyu57.app',
+      hostedZone: hostedZone,
+      region: 'us-east-1', // ACM certificates that are used with CloudFront -- or higher-level constructs which rely on CloudFront -- must be in the us-east-1 region.
+    });
+
+    const certificateTokyo = new acm.DnsValidatedCertificate(this, 'CertificateTokyo', {
+      domainName: '*.cwyu57.app',
+      hostedZone: hostedZone,
+    });
+
+    const listener = lb.addListener("Listener", {
+      // certificates: [certificateTokyo],
+      port: 80,
+    });
+
     listener.addTargets("ECS", {
       port: 80,
       targets: [fatgetService],
     });
 
-    new cloudfront.Distribution(this, 'myDist', {
-      defaultBehavior: { origin: new origins.LoadBalancerV2Origin(lb) },
+    const distribution = new cloudfront.Distribution(this, 'Distribution', {
+      defaultBehavior: {
+        origin: new origins.LoadBalancerV2Origin(lb, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+        }),
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+      },
+      certificate: certificate,
+      domainNames: [
+        'saas-subscription-api.cwyu57.app',
+      ],
     });
+
+
+    new route53.CnameRecord(this, 'CName', {
+      domainName: distribution.domainName,
+      recordName: 'saas-subscription-api.cwyu57.app',
+      zone: hostedZone,
+    })
+
   }
 }
