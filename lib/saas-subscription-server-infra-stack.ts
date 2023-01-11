@@ -16,26 +16,127 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     super(scope, id, props);
 
     // The code that defines your stack goes here
-    const secret = new secretmanager.Secret(this, 'Secret', {
-      secretName: 'saas-subscription-server-secret',
-      secretObjectValue: {
-        PRIVATE_KEY_PATH_BASE64_STR: cdk.SecretValue.unsafePlainText(process.env.PRIVATE_KEY_PATH_BASE64_STR!),
-        PUBLIC_KEY_PATH_BASE64_STR: cdk.SecretValue.unsafePlainText(process.env.PUBLIC_KEY_PATH_BASE64_STR!),
+    const secret = this.prepareSecrets();
 
-        SWAGGER_USERNAME: cdk.SecretValue.unsafePlainText(process.env.SWAGGER_USERNAME!),
-        SWAGGER_PASSWORD: cdk.SecretValue.unsafePlainText(process.env.SWAGGER_PASSWORD!),
+    const vpc = this.prepareVpc();
 
-        SYSTEM_API_KEY: cdk.SecretValue.unsafePlainText(process.env.SYSTEM_API_KEY!),
+    const database = this.prepareDatabase(vpc);
 
-        TAP_PAY_MERCHANT_ID: cdk.SecretValue.unsafePlainText(process.env.TAP_PAY_MERCHANT_ID!),
-        TAP_PAY_PARTNER_KEY: cdk.SecretValue.unsafePlainText(process.env.TAP_PAY_PARTNER_KEY!),
+    const ecrRepository = this.prepareContainerRegistry();
+
+    const lb = this.prepareComputeLayer(vpc, ecrRepository, database, secret);
+    
+    const { certificate, hostedZone } = this.setupDns();
+
+    const distribution = this.prepareCdn(lb, certificate);
+
+    this.addAlternateDomainNameToCdn(distribution, hostedZone);
+
+  }
+
+  private addAlternateDomainNameToCdn(distribution: cdk.aws_cloudfront.Distribution, hostedZone: cdk.aws_route53.PublicHostedZone) {
+    new route53.CnameRecord(this, 'CName', {
+      domainName: distribution.domainName,
+      recordName: 'saas-subscription-api.cwyu57.app',
+      zone: hostedZone,
+    });
+  }
+
+  private prepareCdn(lb: cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer, certificate: cdk.aws_certificatemanager.DnsValidatedCertificate) {
+    return new cloudfront.Distribution(this, 'Distribution', {
+      defaultBehavior: {
+        origin: new origins.LoadBalancerV2Origin(lb, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+        }),
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
       },
+      certificate: certificate,
+      domainNames: [
+        'saas-subscription-api.cwyu57.app',
+      ],
+    });
+  }
+
+  private setupDns() {
+    const hostedZone = new route53.PublicHostedZone(this, 'HostedZone', {
+      zoneName: 'cwyu57.app',
     });
 
-    const vpc = new ec2.Vpc(this, 'VPC', {
-      vpcName: 'saas-subscription-vpc',
+    const certificate = new acm.DnsValidatedCertificate(this, 'Certificate', {
+      domainName: '*.cwyu57.app',
+      hostedZone: hostedZone,
+      region: 'us-east-1', // ACM certificates that are used with CloudFront -- or higher-level constructs which rely on CloudFront -- must be in the us-east-1 region.
+    });
+    return { certificate, hostedZone };
+  }
+
+  private prepareComputeLayer(vpc: cdk.aws_ec2.Vpc, ecrRepository: cdk.aws_ecr.Repository, database: cdk.aws_rds.DatabaseInstance, secret: cdk.aws_secretsmanager.Secret) {
+    const cluster = new ecs.Cluster(this, "EcsCluster", { vpc, clusterName: 'saas-subscription-cluster' });
+
+    const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef");
+
+    const container = taskDefinition.addContainer("WebContainer", {
+      image: ecs.ContainerImage.fromEcrRepository(ecrRepository, '1.0.0'),
+      memoryLimitMiB: 512,
+      environment: {
+        NODE_ENV: 'staging',
+        DOTENV_FLOW_SILENT: 'false',
+        DB_MAX_CONNECTION: '10',
+        DB_MAX_RETRY: '3',
+        TAP_PAY_BASE_URL: 'https://sandbox.tappaysdk.com',
+      },
+      secrets: {
+        DB_HOST: ecs.Secret.fromSecretsManager(database.secret!, 'host'),
+        DB_USERNAME: ecs.Secret.fromSecretsManager(database.secret!, 'username'),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(database.secret!, 'password'),
+        DB_PORT: ecs.Secret.fromSecretsManager(database.secret!, 'port'),
+        DB_DATABASE: ecs.Secret.fromSecretsManager(database.secret!, 'dbname'),
+        PRIVATE_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PRIVATE_KEY_PATH_BASE64_STR'),
+        PUBLIC_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PUBLIC_KEY_PATH_BASE64_STR'),
+        SWAGGER_USERNAME: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_USERNAME'),
+        SWAGGER_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_PASSWORD'),
+        SYSTEM_API_KEY: ecs.Secret.fromSecretsManager(secret, 'SYSTEM_API_KEY'),
+        TAP_PAY_MERCHANT_ID: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_MERCHANT_ID'),
+        TAP_PAY_PARTNER_KEY: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_PARTNER_KEY'),
+      },
+      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'saas-subscription-server' }),
+    });
+    container.addPortMappings({
+      containerPort: 8080,
     });
 
+    const fatgetService = new ecs.FargateService(this, "FargateService", {
+      cluster,
+      taskDefinition,
+      serviceName: 'saas-subscription-svc'
+    });
+
+    const lb = new elbv2.ApplicationLoadBalancer(this, "LB", {
+      vpc,
+      internetFacing: true,
+      loadBalancerName: 'saas-subscription-lb',
+    });
+
+    const listener = lb.addListener("Listener", {
+      port: 80,
+    });
+
+    listener.addTargets("ECS", {
+      port: 80,
+      targets: [fatgetService],
+    });
+    return lb;
+  }
+
+  private prepareContainerRegistry() {
+    return new ecr.Repository(this, 'ECR', {
+      repositoryName: 'saas-subscription-server'
+    });
+  }
+
+  private prepareDatabase(vpc: cdk.aws_ec2.Vpc) {
     const rdsSecurityGroup = new ec2.SecurityGroup(this, "RdsSecurityGroup", {
       vpc,
       securityGroupName: 'saas-subscription-sg'
@@ -64,97 +165,30 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
       },
       securityGroups: [rdsSecurityGroup],
     });
+    return instance;
+  }
 
-    const ecrRepository = new ecr.Repository(this, 'ECR', {
-      repositoryName: 'saas-subscription-server'
+  private prepareVpc() {
+    return new ec2.Vpc(this, 'VPC', {
+      vpcName: 'saas-subscription-vpc',
     });
+  }
 
-    const cluster = new ecs.Cluster(this, "EcsCluster", { vpc, clusterName: 'saas-subscription-cluster' });
+  private prepareSecrets() {
+    return new secretmanager.Secret(this, 'Secret', {
+      secretName: 'saas-subscription-server-secret',
+      secretObjectValue: {
+        PRIVATE_KEY_PATH_BASE64_STR: cdk.SecretValue.unsafePlainText(process.env.PRIVATE_KEY_PATH_BASE64_STR!),
+        PUBLIC_KEY_PATH_BASE64_STR: cdk.SecretValue.unsafePlainText(process.env.PUBLIC_KEY_PATH_BASE64_STR!),
 
-    const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef");
+        SWAGGER_USERNAME: cdk.SecretValue.unsafePlainText(process.env.SWAGGER_USERNAME!),
+        SWAGGER_PASSWORD: cdk.SecretValue.unsafePlainText(process.env.SWAGGER_PASSWORD!),
 
-    const container = taskDefinition.addContainer("WebContainer", {
-      image: ecs.ContainerImage.fromEcrRepository(ecrRepository, '1.0.0'),
-      memoryLimitMiB: 512,
-      environment: {
-        NODE_ENV: 'staging',
-        DOTENV_FLOW_SILENT: 'false',
-        DB_MAX_CONNECTION: '10',
-        DB_MAX_RETRY: '3',
-        TAP_PAY_BASE_URL: 'https://sandbox.tappaysdk.com',
+        SYSTEM_API_KEY: cdk.SecretValue.unsafePlainText(process.env.SYSTEM_API_KEY!),
+
+        TAP_PAY_MERCHANT_ID: cdk.SecretValue.unsafePlainText(process.env.TAP_PAY_MERCHANT_ID!),
+        TAP_PAY_PARTNER_KEY: cdk.SecretValue.unsafePlainText(process.env.TAP_PAY_PARTNER_KEY!),
       },
-      secrets: {
-        DB_HOST: ecs.Secret.fromSecretsManager(instance.secret!, 'host'),
-        DB_USERNAME: ecs.Secret.fromSecretsManager(instance.secret!, 'username'),
-        DB_PASSWORD: ecs.Secret.fromSecretsManager(instance.secret!, 'password'),
-        DB_PORT: ecs.Secret.fromSecretsManager(instance.secret!, 'port'),
-        DB_DATABASE: ecs.Secret.fromSecretsManager(instance.secret!, 'dbname'),
-        PRIVATE_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PRIVATE_KEY_PATH_BASE64_STR'),
-        PUBLIC_KEY_PATH_BASE64_STR: ecs.Secret.fromSecretsManager(secret, 'PUBLIC_KEY_PATH_BASE64_STR'),
-        SWAGGER_USERNAME: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_USERNAME'),
-        SWAGGER_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'SWAGGER_PASSWORD'),
-        SYSTEM_API_KEY: ecs.Secret.fromSecretsManager(secret, 'SYSTEM_API_KEY'),
-        TAP_PAY_MERCHANT_ID: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_MERCHANT_ID'),
-        TAP_PAY_PARTNER_KEY: ecs.Secret.fromSecretsManager(secret, 'TAP_PAY_PARTNER_KEY'),
-      },
-      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'saas-subscription-server' }),
     });
-    container.addPortMappings({
-      containerPort: 8080,
-    });
-
-    const fatgetService = new ecs.FargateService(this, "FargateService", {
-      cluster,
-      taskDefinition,
-      serviceName: 'saas-subscription-svc'
-    });
-
-    const lb = new elbv2.ApplicationLoadBalancer(this, "LB", {
-      vpc,
-      internetFacing: true,
-      loadBalancerName: 'saas-subscription-lb',
-    });
-
-    const hostedZone = new route53.PublicHostedZone(this, 'HostedZone', {
-      zoneName: 'cwyu57.app',
-    });
-
-    const certificate = new acm.DnsValidatedCertificate(this, 'Certificate', {
-      domainName: '*.cwyu57.app',
-      hostedZone: hostedZone,
-      region: 'us-east-1', // ACM certificates that are used with CloudFront -- or higher-level constructs which rely on CloudFront -- must be in the us-east-1 region.
-    });
-
-    const listener = lb.addListener("Listener", {
-      port: 80,
-    });
-
-    listener.addTargets("ECS", {
-      port: 80,
-      targets: [fatgetService],
-    });
-
-    const distribution = new cloudfront.Distribution(this, 'Distribution', {
-      defaultBehavior: {
-        origin: new origins.LoadBalancerV2Origin(lb, {
-          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-        }),
-        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
-        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-      },
-      certificate: certificate,
-      domainNames: [
-        'saas-subscription-api.cwyu57.app',
-      ],
-    });
-
-
-    new route53.CnameRecord(this, 'CName', {
-      domainName: distribution.domainName,
-      recordName: 'saas-subscription-api.cwyu57.app',
-      zone: hostedZone,
-    })
-
   }
 }
