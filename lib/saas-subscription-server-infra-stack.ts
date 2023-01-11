@@ -37,6 +37,11 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
 
     this.addAlternateDomainNameToCdn(distribution, hostedZone);
 
+    this.prepareCicd(vpc, ecrRepository, fargateService);
+
+  }
+
+  private prepareCicd(vpc: cdk.aws_ec2.Vpc, ecrRepository: cdk.aws_ecr.Repository, fargateService: cdk.aws_ecs.FargateService) {
     const artifactBucket = new s3.Bucket(this, 'ArtifactsBucket', {
       bucketName: 'saas-subscription-cicd-artifacts',
     });
@@ -149,8 +154,6 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
         },
       ]
     });
-
-
   }
 
   private addAlternateDomainNameToCdn(distribution: cdk.aws_cloudfront.Distribution, hostedZone: cdk.aws_route53.PublicHostedZone) {
