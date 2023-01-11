@@ -74,13 +74,6 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
           },
           build: {
             commands: [
-              // 'printenv',
-              // 'aws --version',
-              // 'docker -v',
-              // "AWS_ACCOUNT_ID=$(aws sts get-caller-identity --output text | awk '{ print $1 }')",
-              // "echo $AWS_ACCOUNT_ID",
-              // "echo $TAG",
-
               "TAG=$(echo $CODEBUILD_WEBHOOK_TRIGGER | cut -d / -f 2)",
 
               "$(aws ecr get-login --no-include-email --region $AWS_REGION)",
@@ -93,7 +86,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
               "docker push $ECR_URI:$TAG",
               "docker push $ECR_URI:latest",
 
-              "echo '[{\"name\":\"saas-subscription-server\",\"imageUri\":\"$ECR_URI:$TAG\"}]' > imagedefinitions.json"
+              "printf '[{\"name\":\"saas-subscription-server\",\"imageUri\":\"%s\"}]' $ECR_URI:$TAG > imagedefinitions.json"
             ],
           },
         },
@@ -135,6 +128,14 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
             }),
           ],
         },
+        // {
+        //   stageName: 'ManualApproval',
+        //   actions: [
+        //     new codepipelineactions.ManualApprovalAction({
+        //       actionName: 'ManualApprovalAction',
+        //     }),
+        //   ],
+        // },
         {
           stageName: `DeployToECS`,
           actions: [
@@ -225,7 +226,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
       containerPort: 8080,
     });
 
-    const fatgetService = new ecs.FargateService(this, "FargateService", {
+    const fargateService = new ecs.FargateService(this, "FargateService", {
       cluster,
       taskDefinition,
       serviceName: 'saas-subscription-svc'
@@ -243,9 +244,9 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
 
     listener.addTargets("ECS", {
       port: 80,
-      targets: [fatgetService],
+      targets: [fargateService],
     });
-    return { lb, fatgetService };
+    return { lb, fargateService };
   }
 
   private prepareContainerRegistry() {
