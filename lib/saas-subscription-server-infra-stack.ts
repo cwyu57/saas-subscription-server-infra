@@ -1,5 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -114,6 +116,10 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     listener.addTargets("ECS", {
       port: 80,
       targets: [fatgetService],
+    });
+
+    new cloudfront.Distribution(this, 'myDist', {
+      defaultBehavior: { origin: new origins.LoadBalancerV2Origin(lb) },
     });
   }
 }
