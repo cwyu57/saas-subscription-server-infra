@@ -1,14 +1,54 @@
-# Welcome to your CDK TypeScript project
+# SAAS Subscription Server Infra
 
-This is a blank project for CDK development with TypeScript.
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+### Prerequisite
 
-## Useful commands
+- Node.js 16.19.0
 
-* `npm run build`   compile typescript to js
-* `npm run watch`   watch for changes and compile
-* `npm run test`    perform the jest unit tests
-* `cdk deploy`      deploy this stack to your default AWS account/region
-* `cdk diff`        compare deployed stack with current state
-* `cdk synth`       emits the synthesized CloudFormation template
+
+### Local Development
+
+- Prepare Following Environment Variables
+  - PRIVATE_KEY_PATH_BASE64_STR
+  - PUBLIC_KEY_PATH_BASE64_STR
+  - SWAGGER_USERNAME
+  - SWAGGER_PASSWORD
+  - SYSTEM_API_KEY
+  - TAP_PAY_MERCHANT_ID
+  - TAP_PAY_PARTNER_KEY
+
+
+- npm install
+
+
+- cdk diff
+  
+  ```
+  RIVATE_KEY_PATH_BASE64_STR= \
+  PUBLIC_KEY_PATH_BASE64_STR= \
+  SWAGGER_USERNAME= \
+  SWAGGER_PASSWORD= \
+  SYSTEM_API_KEY= \
+  TAP_PAY_MERCHANT_ID= \
+  TAP_PAY_PARTNER_KEY= \
+    npx cdk diff
+  ```
+
+
+- cdk deploy
+
+  ```
+  PRIVATE_KEY_PATH_BASE64_STR= \
+  PUBLIC_KEY_PATH_BASE64_STR= \
+  SWAGGER_USERNAME= \
+  SWAGGER_PASSWORD= \
+  SYSTEM_API_KEY= \
+  TAP_PAY_MERCHANT_ID= \
+  TAP_PAY_PARTNER_KEY= \
+    npx cdk deploy
+  ```
+
+
+### Architecture Diagram
+
+ ![Architecture-Diagram](./doc/architecture-diagram.png)
