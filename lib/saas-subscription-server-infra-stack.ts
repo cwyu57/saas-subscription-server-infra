@@ -134,14 +134,14 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
             }),
           ],
         },
-        // {
-        //   stageName: 'ManualApproval',
-        //   actions: [
-        //     new codepipelineactions.ManualApprovalAction({
-        //       actionName: 'ManualApprovalAction',
-        //     }),
-        //   ],
-        // },
+        {
+          stageName: 'ManualApproval',
+          actions: [
+            new codepipelineactions.ManualApprovalAction({
+              actionName: 'ManualApprovalAction',
+            }),
+          ],
+        },
         {
           stageName: `DeployToECS`,
           actions: [
