@@ -201,7 +201,7 @@ export class SaasSubscriptionServerInfraStack extends cdk.Stack {
     const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef");
 
     const container = taskDefinition.addContainer("saas-subscription-server", {
-      image: ecs.ContainerImage.fromEcrRepository(ecrRepository, '1.0.0'),
+      image: ecs.ContainerImage.fromEcrRepository(ecrRepository, 'latest'),
       memoryLimitMiB: 512,
       environment: {
         NODE_ENV: 'staging',
